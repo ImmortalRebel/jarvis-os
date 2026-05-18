@@ -1,0 +1,127 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #000000;
+  --foreground: #e0f7fa;
+  --card: oklch(0.1 0.02 220 / 0.5);
+  --card-foreground: #e0f7fa;
+  --popover: oklch(0.08 0.02 220 / 0.9);
+  --popover-foreground: #e0f7fa;
+  --primary: #00e5ff;
+  --primary-foreground: #000000;
+  --secondary: #2979ff;
+  --secondary-foreground: #e0f7fa;
+  --muted: oklch(0.15 0.02 220 / 0.4);
+  --muted-foreground: #4dd0e1;
+  --accent: #7c4dff;
+  --accent-foreground: #ffffff;
+  --destructive: #ff5252;
+  --destructive-foreground: #ffffff;
+  --border: oklch(0.4 0.1 195 / 0.2);
+  --input: oklch(0.12 0.02 220 / 0.6);
+  --ring: oklch(0.7 0.15 195 / 0.5);
+  --chart-1: #00e5ff;
+  --chart-2: #2979ff;
+  --chart-3: #7c4dff;
+  --chart-4: #00bcd4;
+  --chart-5: #536dfe;
+  --radius: 0.5rem;
+  
+  /* HUD glow colors */
+  --cyan-glow: #00e5ff;
+  --blue-glow: #2979ff;
+  --purple-glow: #7c4dff;
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Geist Fallback', system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback', monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-cyan-glow: var(--cyan-glow);
+  --color-blue-glow: var(--blue-glow);
+  --color-purple-glow: var(--purple-glow);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground overflow-hidden;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 229, 255, 0.3);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 229, 255, 0.5);
+}
+
+/* HUD glow effects */
+.glow-cyan {
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.4), 0 0 40px rgba(0, 229, 255, 0.2), 0 0 60px rgba(0, 229, 255, 0.1);
+}
+
+.glow-blue {
+  box-shadow: 0 0 20px rgba(41, 121, 255, 0.4), 0 0 40px rgba(41, 121, 255, 0.2);
+}
+
+.glow-purple {
+  box-shadow: 0 0 20px rgba(124, 77, 255, 0.4), 0 0 40px rgba(124, 77, 255, 0.2);
+}
+
+.text-glow-cyan {
+  text-shadow: 0 0 10px rgba(0, 229, 255, 0.8), 0 0 20px rgba(0, 229, 255, 0.5), 0 0 30px rgba(0, 229, 255, 0.3);
+}
+
+.text-glow-blue {
+  text-shadow: 0 0 10px rgba(41, 121, 255, 0.8), 0 0 20px rgba(41, 121, 255, 0.5);
+}
+
+/* Radial vignette overlay */
+.radial-overlay {
+  background: radial-gradient(ellipse at center, transparent 0%, rgba(0, 0, 0, 0.7) 60%, rgba(0, 0, 0, 0.95) 100%);
+}
