@@ -354,7 +354,7 @@ export function BootSequence({ onComplete }: BootSequenceProps) {
 }
 
 function ParticleField() {
-  const [particles, setParticles] = useState([]);
+  const [particles, setParticles] = useState<Array<{ id: number; left: number; top: number; duration: number; delay: number }>>([]);
 
   useEffect(() => {
     const generatedParticles = [...Array(50)].map((_, i) => ({
