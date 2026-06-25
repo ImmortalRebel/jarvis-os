@@ -1,16 +1,36 @@
-// store/index.ts
-// Barrel export for all Jarvis OS Zustand stores.
-// Usage: import { useAssistantStore, useVoiceStore } from '@/store'
+// hooks/index.ts
+// Barrel export for all Jarvis OS custom hooks.
+// All hooks are 'use client' — never import into Server Components.
 
-// Correct relative path to the store implementations (these live in ../store)
-export { useAssistantStore } from '../store/useAssistantStore';
-export type { AssistantState } from '../store/useAssistantStore';
+// ── Primary runtime interface ──────────────────────────────────
+export { useRuntime } from './useRuntime';
 
-export { useVoiceStore } from '../store/useVoiceStore';
-export type { VoiceStoreState } from '../store/useVoiceStore';
+// ── Assistant state ────────────────────────────────────────────
+export { useAssistant } from './useAssistant';
+export { useAssistantMode } from './useAssistantMode';
 
-export { useUIStore } from '../store/useUIStore';
-export type { UIStoreState, PanelId, UINotification, JarvisTheme } from '../store/useUIStore';
+// ── Conversation ───────────────────────────────────────────────
+export { useConversation } from './useConversation';
 
-export { useMemoryStore } from '../store/useMemoryStore';
-export type { MemoryStoreState, MemoryQuery, MemorySearchResult, MemoryStatus } from '../store/useMemoryStore';
+// ── Voice pipeline (Goal 4) ────────────────────────────────────
+export { useVoiceState } from './useVoiceState';
+export { useMicrophone } from './useMicrophone';
+export { useTTS } from './useTTS';
+export { useVoiceInput } from './useVoiceInput';
+export { useWakeWord } from './useWakeWord';
+
+// ── Performance selectors (Goal 7) ────────────────────────────
+export {
+  useOptimizedSelector,
+  useAssistantSelector,
+  useVoiceSelector,
+  useUISelector,
+  useModeFlags,
+  useConversationMeta,
+  useAudioAnalysis,
+  useTTSState,
+  useUIPreferences,
+} from './useOptimizedSelector';
+
+// ── Electron IPC ───────────────────────────────────────────────
+export { useIPCChannel, useIPCChannelOnce, useIPCSend, useIsElectron } from './useIPCBridge';

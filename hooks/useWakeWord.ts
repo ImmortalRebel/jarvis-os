@@ -50,13 +50,10 @@ interface UseWakeWordReturn {
   lastDetectedAt: number | null;
 }
 
-// Browser globals for SpeechRecognition — same augmentation as useVoiceInput.ts
-declare global {
-  interface Window {
-    SpeechRecognition: typeof SpeechRecognition;
-    webkitSpeechRecognition: typeof SpeechRecognition;
-  }
-}
+// SpeechRecognition, SpeechRecognitionEvent, SpeechRecognitionErrorEvent and
+// Window.webkitSpeechRecognition are declared globally in:
+//   types/speech-recognition.d.ts
+// No local declare global needed here.
 
 // ─────────────────────────────────────────
 // HOOK
@@ -67,6 +64,7 @@ export function useWakeWord({
   autoStart = false,
 }: UseWakeWordOptions = {}): UseWakeWordReturn {
   const [isListening, setIsListening] = useState(false);
+  const isListeningRef = useRef(false); // ref mirror — avoids stale closure in recognition.onend
   const [lastDetectedAt, setLastDetectedAt] = useState<number | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
@@ -190,7 +188,7 @@ export function useWakeWord({
 
     // Auto-restart on end so detection is continuous
     recognition.onend = () => {
-      if (recognitionRef.current && isListening) {
+      if (recognitionRef.current && isListeningRef.current) {
         try { recognition.start(); } catch { /* ignore */ }
       }
     };
@@ -198,7 +196,7 @@ export function useWakeWord({
     recognitionRef.current = recognition;
 
     if (autoStart && wakeWordConfig.enabled) {
-      try { recognition.start(); setIsListening(true); } catch { /* ignore */ }
+      try { recognition.start(); isListeningRef.current = true; setIsListening(true); } catch { /* ignore */ }
     }
 
     return () => {
@@ -218,6 +216,7 @@ export function useWakeWord({
 
   const start = useCallback(() => {
     if (!isSupported || isListening) return;
+    isListeningRef.current = true;
     setIsListening(true);
     setVoiceState('detecting');
 
@@ -236,6 +235,7 @@ export function useWakeWord({
 
   const stop = useCallback(() => {
     if (!isListening) return;
+    isListeningRef.current = false;
     setIsListening(false);
     setVoiceState('inactive');
 

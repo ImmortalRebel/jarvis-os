@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "lib": ["ES2020"],
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowJs": false,
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": false,
+    "outDir": "dist-electron",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "electron/**/*.ts",
+    "lib/ipc/channels.ts",
+    "types/ipc.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "app",
+    "components",
+    "hooks",
+    "store",
+    ".next"
+  ]
+}

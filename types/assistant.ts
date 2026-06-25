@@ -1,19 +1,20 @@
 // types/assistant.ts
 // Central type definitions for the Jarvis OS assistant system.
-// Pure TypeScript — no runtime dependencies, safe to import anywhere (server or client).
+// Pure TypeScript — no runtime dependencies, safe to import anywhere.
 
 // ─────────────────────────────────────────
 // ASSISTANT MODES
 // ─────────────────────────────────────────
 
 export type AssistantMode =
-  | 'idle'       // Default state — passively ready
+  | 'idle'       // Default — awake, passively ready
   | 'listening'  // Actively recording user speech
-  | 'processing' // AI pipeline running (STT → LLM → TTS)
+  | 'processing' // STT → LLM pipeline running
+  | 'thinking'   // Extended reasoning / tool-use loop
   | 'speaking'   // TTS playback in progress
-  | 'error'      // Error state — shows error UI
-  | 'wake'       // Wake word just detected (brief animation state)
-  | 'thinking';  // Extended processing (long tasks, tool use, multi-step)
+  | 'sleeping'   // Low-power background mode (wake-word only)
+  | 'wake'       // Wake word just detected (brief transition state)
+  | 'error';     // Error state — requires user action
 
 // ─────────────────────────────────────────
 // VOICE STATE
@@ -21,24 +22,63 @@ export type AssistantMode =
 
 export type VoiceState =
   | 'inactive'   // No audio activity
-  | 'detecting'  // Wake word detection running in background
+  | 'detecting'  // Wake word detection running
   | 'recording'  // Microphone capturing user input
   | 'processing' // STT model running
-  | 'playing'    // TTS output playing back
+  | 'playing'    // TTS output playing
   | 'muted';     // User has muted the microphone
+
+// ─────────────────────────────────────────
+// MODE METADATA
+// ─────────────────────────────────────────
+
+export interface AssistantModeConfig {
+  label: string;
+  /** Whether microphone should be active */
+  micActive: boolean;
+  /** Whether to show voice visualizer */
+  showVisualizer: boolean;
+  /** Animation variant key */
+  animationKey: string;
+  /** CSS color token for the mode indicator */
+  colorToken: string;
+}
+
+export const ASSISTANT_MODE_CONFIG: Record<AssistantMode, AssistantModeConfig> = {
+  idle:       { label: 'Ready',        micActive: false, showVisualizer: false, animationKey: 'idle',       colorToken: 'muted-foreground' },
+  sleeping:   { label: 'Sleeping',     micActive: false, showVisualizer: false, animationKey: 'sleep',      colorToken: 'muted-foreground' },
+  wake:       { label: 'Waking…',      micActive: false, showVisualizer: false, animationKey: 'wake',       colorToken: 'yellow-300'       },
+  listening:  { label: 'Listening…',   micActive: true,  showVisualizer: true,  animationKey: 'listening',  colorToken: 'cyan-400'         },
+  processing: { label: 'Processing…',  micActive: false, showVisualizer: false, animationKey: 'processing', colorToken: 'blue-400'         },
+  thinking:   { label: 'Thinking…',    micActive: false, showVisualizer: false, animationKey: 'thinking',   colorToken: 'purple-400'       },
+  speaking:   { label: 'Speaking…',    micActive: false, showVisualizer: true,  animationKey: 'speaking',   colorToken: 'emerald-400'      },
+  error:      { label: 'Error',        micActive: false, showVisualizer: false, animationKey: 'error',      colorToken: 'red-400'          },
+};
+
+// ─────────────────────────────────────────
+// VALID MODE TRANSITIONS
+// State machine — which modes can follow which
+// ─────────────────────────────────────────
+
+export const VALID_TRANSITIONS: Record<AssistantMode, AssistantMode[]> = {
+  idle:       ['listening', 'sleeping', 'wake', 'error'],
+  sleeping:   ['wake', 'idle'],
+  wake:       ['listening', 'idle'],
+  listening:  ['processing', 'idle', 'error'],
+  processing: ['thinking', 'speaking', 'idle', 'error'],
+  thinking:   ['processing', 'speaking', 'idle', 'error'],
+  speaking:   ['idle', 'listening', 'error'],
+  error:      ['idle', 'sleeping'],
+};
 
 // ─────────────────────────────────────────
 // WAKE WORD CONFIG
 // ─────────────────────────────────────────
 
 export interface WakeWordConfig {
-  /** The trigger phrase, e.g. "Hey Jarvis" */
   phrase: string;
-  /** Detection confidence threshold 0–1 */
   threshold: number;
-  /** Wake word engine backend */
   engine: 'porcupine' | 'picovoice' | 'custom' | 'browser';
-  /** Whether wake word detection is currently active */
   enabled: boolean;
 }
 
@@ -53,14 +93,10 @@ export interface ConversationMessage {
   role: MessageRole;
   content: string;
   timestamp: number;
-  /** Playback duration in ms for assistant voice messages */
   audioDuration?: number;
-  /** Whether this message was delivered via voice */
   isVoice?: boolean;
-  /** Tool call metadata for function-calling pipeline */
   toolCallId?: string;
   toolName?: string;
-  /** Whether this message is still being streamed */
   isStreaming?: boolean;
 }
 
@@ -69,9 +105,7 @@ export interface ConversationMessage {
 // ─────────────────────────────────────────
 
 export type AIProvider = 'openai' | 'anthropic' | 'ollama' | 'local' | 'custom';
-
 export type TTSProvider = 'elevenlabs' | 'openai' | 'browser' | 'local';
-
 export type STTProvider = 'whisper' | 'browser' | 'deepgram' | 'local';
 
 export interface AIConfig {
@@ -80,7 +114,6 @@ export interface AIConfig {
   temperature: number;
   maxTokens: number;
   systemPrompt: string;
-  /** Streaming response (token-by-token) enabled */
   streamingEnabled: boolean;
 }
 
@@ -95,14 +128,12 @@ export interface TTSConfig {
 export interface STTConfig {
   provider: STTProvider;
   language: string;
-  /** Silence threshold in dB before auto-stop recording */
   silenceThreshold: number;
-  /** Max recording duration in ms (safety cutoff) */
   maxDuration: number;
 }
 
 // ─────────────────────────────────────────
-// MEMORY SYSTEM (foundation for future build-out)
+// MEMORY
 // ─────────────────────────────────────────
 
 export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'working';
@@ -111,14 +142,11 @@ export interface MemoryEntry {
   id: string;
   type: MemoryType;
   content: string;
-  /** Vector embedding for semantic search (populated async) */
   embedding?: number[];
   metadata: Record<string, unknown>;
   createdAt: number;
   accessedAt: number;
-  /** Relevance/importance score 0–1 */
   importance: number;
-  /** Number of times this memory was accessed */
   accessCount: number;
 }
 
@@ -129,8 +157,6 @@ export interface MemoryEntry {
 export interface SystemPermissions {
   microphone: PermissionState | 'unknown';
   notifications: PermissionState | 'unknown';
-  /** Electron-only: local filesystem read access */
   filesystem?: boolean;
-  /** Electron-only: system tray access */
   systemTray?: boolean;
 }

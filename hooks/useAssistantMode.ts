@@ -55,6 +55,7 @@ interface AssistantModeState {
 
 const MODE_COLORS: Record<AssistantMode, string> = {
   idle:       'text-muted-foreground',
+  sleeping:   'text-muted-foreground',
   listening:  'text-cyan-400',
   processing: 'text-blue-400',
   thinking:   'text-purple-400',
@@ -65,6 +66,7 @@ const MODE_COLORS: Record<AssistantMode, string> = {
 
 const MODE_LABELS: Record<AssistantMode, string> = {
   idle:       'Ready',
+  sleeping:   'Sleeping',
   listening:  'Listening…',
   processing: 'Processing…',
   thinking:   'Thinking…',
@@ -80,6 +82,7 @@ function getOrbVariantsForMode(mode: AssistantMode): { variants: Variants; key: 
     case 'thinking':   return { variants: orbThinkingVariants,    key: 'animate' };
     case 'speaking':   return { variants: orbSpeakingVariants,    key: 'animate' };
     case 'wake':       return { variants: orbWakeVariants,        key: 'animate' };
+    case 'sleeping':
     case 'idle':
     case 'error':
     default:           return { variants: orbIdleVariants,        key: 'animate' };

@@ -13,15 +13,12 @@ import { useVoiceStore } from '@/store/useVoiceStore';
 import { useAssistantStore } from '@/store/useAssistantStore';
 
 // ─────────────────────────────────────────
-// BROWSER API TYPE AUGMENTATION
+// BROWSER API TYPES
 // ─────────────────────────────────────────
-
-declare global {
-  interface Window {
-    SpeechRecognition: typeof SpeechRecognition;
-    webkitSpeechRecognition: typeof SpeechRecognition;
-  }
-}
+// SpeechRecognition, SpeechRecognitionEvent, SpeechRecognitionErrorEvent and
+// Window.webkitSpeechRecognition are declared globally in:
+//   types/speech-recognition.d.ts
+// No local declare global needed here.
 
 // ─────────────────────────────────────────
 // OPTIONS & RETURN TYPES

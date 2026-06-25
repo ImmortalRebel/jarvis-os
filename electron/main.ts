@@ -1,89 +1,69 @@
 // electron/main.ts
-// Electron main process — application entry point for the desktop build.
-//
-// Responsibilities:
-//   - Create and manage the BrowserWindow
-//   - Serve the Next.js build (or dev server)
-//   - Handle IPC messages from the renderer via ipcMain.handle / ipcMain.on
-//   - Manage system tray
-//   - Route wake-word engine events to the renderer
-//
-// IMPORTANT: This file is NOT compiled by Next.js.
-// It must be compiled by electron-vite / electron-builder separately.
-// Suggested tsconfig for electron: tsconfig.electron.json (see SETUP.md)
-//
-// Dependency note: This file only imports from 'electron' and Node built-ins.
-// No Next.js or browser APIs are used here.
+// Jarvis OS Electron main process — Phase 2B upgrade.
+// Compile with: pnpm electron:build (uses tsconfig.electron.json)
+// NOT compiled by Next.js (electron/ is in tsconfig.json "exclude" array).
 
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell } from 'electron';
+import {
+  app, BrowserWindow, ipcMain, Tray, Menu,
+  nativeImage, shell, globalShortcut, systemPreferences,
+} from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import { IPC_CHANNELS } from '../lib/ipc/channels';
 
 // ─────────────────────────────────────────
-// ENVIRONMENT FLAGS
+// ENVIRONMENT
 // ─────────────────────────────────────────
 
 const isDev = process.env.NODE_ENV === 'development';
 const NEXT_DEV_URL = 'http://localhost:3000';
-// In production, Next.js exports to /out — adjust if you use a custom output dir
-const NEXT_PROD_URL = path.join(__dirname, '../out/index.html');
+const NEXT_PROD_FILE = path.join(__dirname, '../out/index.html');
 
 // ─────────────────────────────────────────
-// GLOBAL STATE
+// GLOBALS
 // ─────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let wakeWordActive = false;
 
 // ─────────────────────────────────────────
-// WINDOW CREATION
+// WINDOW
 // ─────────────────────────────────────────
 
-function createMainWindow(): BrowserWindow {
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 1200,
+    width: 1280,
     height: 800,
-    minWidth: 800,
+    minWidth: 900,
     minHeight: 600,
-    // Frameless for the Jarvis OS aesthetic — custom title bar in renderer
     frame: false,
     transparent: false,
     titleBarStyle: 'hidden',
-    backgroundColor: '#09090b', // Matches --background in globals.css dark theme
+    backgroundColor: '#09090b',
     icon: path.join(__dirname, '../public/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      // Security hardening
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
-      // Allow media access for microphone
-      webviewTag: false,
     },
-    show: false, // Use 'ready-to-show' to prevent white flash
+    show: false,
   });
 
-  // ── Load the app ──────────────────────────────────────────────
   if (isDev) {
     win.loadURL(NEXT_DEV_URL);
     win.webContents.openDevTools({ mode: 'detach' });
   } else {
-    win.loadFile(NEXT_PROD_URL);
+    win.loadFile(NEXT_PROD_FILE);
   }
 
-  // ── Show window only when fully loaded (prevents flash) ───────
-  win.once('ready-to-show', () => {
-    win.show();
-    win.focus();
-  });
+  win.once('ready-to-show', () => { win.show(); win.focus(); });
 
-  // ── Window events ──────────────────────────────────────────────
-  win.on('closed', () => {
-    mainWindow = null;
-  });
+  win.on('closed', () => { mainWindow = null; });
 
-  // Intercept external link clicks — open in system browser
+  // Block new window creation — open externally instead
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -93,32 +73,39 @@ function createMainWindow(): BrowserWindow {
 }
 
 // ─────────────────────────────────────────
-// SYSTEM TRAY
+// TRAY
 // ─────────────────────────────────────────
 
 function createTray(): Tray {
   const iconPath = path.join(__dirname, '../public/tray-icon.png');
-  const icon = nativeImage.createFromPath(iconPath);
-  const t = new Tray(icon.resize({ width: 16, height: 16 }));
+  const icon = fs.existsSync(iconPath)
+    ? nativeImage.createFromPath(iconPath).resize({ width: 16 })
+    : nativeImage.createEmpty();
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Show Jarvis',
-      click: () => {
-        mainWindow?.show();
-        mainWindow?.focus();
+  const t = new Tray(icon);
+
+  const rebuild = () => {
+    const menuItems = [
+      {
+        label: 'Show Jarvis',
+        click: () => { mainWindow?.show(); mainWindow?.focus(); },
       },
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit',
-      click: () => app.quit(),
-    },
-  ]);
+      { type: 'separator' as const },
+      {
+        label: wakeWordActive ? 'Disable Wake Word' : 'Enable Wake Word',
+        click: () => {
+          wakeWordActive ? stopWakeWord() : startWakeWord({ phrase: 'Hey Jarvis', threshold: 0.6 });
+          rebuild();
+        },
+      },
+      { type: 'separator' as const },
+      { label: 'Quit Jarvis', click: () => app.quit() },
+    ];
+    t.setContextMenu(Menu.buildFromTemplate(menuItems));
+  };
 
+  rebuild();
   t.setToolTip('Jarvis OS');
-  t.setContextMenu(contextMenu);
-
   t.on('click', () => {
     mainWindow?.show();
     mainWindow?.focus();
@@ -129,125 +116,140 @@ function createTray(): Tray {
 }
 
 // ─────────────────────────────────────────
-// IPC HANDLERS — Window controls
+// WAKE WORD
 // ─────────────────────────────────────────
 
-function registerWindowHandlers() {
-  ipcMain.on('window:minimize', () => mainWindow?.minimize());
+function startWakeWord(config: { phrase: string; threshold: number }): void {
+  wakeWordActive = true;
+  console.log(`[Jarvis] Wake word started: "${config.phrase}" (${config.threshold})`);
 
-  ipcMain.on('window:maximize', () => {
-    if (mainWindow?.isMaximized()) {
-      mainWindow.unmaximize();
-    } else {
-      mainWindow?.maximize();
+  // ─────────────────────────────────────────────────────────────────────
+  // TODO: Replace this stub with a real wake word engine.
+  //
+  // Option A — Porcupine (recommended):
+  //   const { Porcupine } = require('@picovoice/porcupine-node')
+  //   porcupine = new Porcupine(accessKey, [BuiltInKeyword.JARVIS], [config.threshold])
+  //   // In audio loop: if (porcupine.process(pcmFrame) >= 0) fireWake()
+  //
+  // Option B — Snowboy (legacy):
+  //   const Snowboy = require('snowboy')
+  //
+  // When detected, call:
+  //   mainWindow?.webContents.send(IPC_CHANNELS.WAKE_WORD_DETECTED, 0.9)
+  // ─────────────────────────────────────────────────────────────────────
+}
+
+function stopWakeWord(): void {
+  wakeWordActive = false;
+  console.log('[Jarvis] Wake word stopped');
+  // TODO: Clean up your wake word engine instance here
+}
+
+function fireWakeWord(confidence: number): void {
+  if (!mainWindow) return;
+  mainWindow.webContents.send(IPC_CHANNELS.WAKE_WORD_DETECTED, confidence);
+  mainWindow.webContents.send(IPC_CHANNELS.JARVIS_WAKE);
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
+// ─────────────────────────────────────────
+// GLOBAL SHORTCUTS (Electron-registered)
+// ─────────────────────────────────────────
+
+function registerGlobalShortcuts(): void {
+  // Ctrl+Shift+J — toggle Jarvis from anywhere on the system
+  const registered = globalShortcut.register('CommandOrControl+Shift+J', () => {
+    if (!mainWindow) return;
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+      mainWindow.focus();
     }
+    mainWindow.webContents.send(IPC_CHANNELS.JARVIS_WAKE);
   });
 
-  ipcMain.on('window:close', () => mainWindow?.close());
+  if (!registered) {
+    console.warn('[Jarvis] Global shortcut Ctrl+Shift+J could not be registered (may be in use)');
+  }
+}
 
-  ipcMain.on('window:always-on-top', (_event, value: boolean) => {
+// ─────────────────────────────────────────
+// IPC HANDLERS
+// ─────────────────────────────────────────
+
+function registerIPCHandlers(): void {
+
+  // ── Window controls ──────────────────────────────────────────────────
+  ipcMain.on('window:minimize', () => mainWindow?.minimize());
+  ipcMain.on('window:maximize', () => {
+    mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize();
+  });
+  ipcMain.on('window:close', () => mainWindow?.close());
+  ipcMain.on('window:always-on-top', (_e, value: boolean) => {
     mainWindow?.setAlwaysOnTop(value);
   });
-}
 
-// ─────────────────────────────────────────
-// IPC HANDLERS — System info
-// ─────────────────────────────────────────
-
-function registerSystemHandlers() {
+  // ── System info ──────────────────────────────────────────────────────
   ipcMain.handle('system:get-platform', () => process.platform);
   ipcMain.handle('system:get-version', () => app.getVersion());
-}
 
-// ─────────────────────────────────────────
-// IPC HANDLERS — User data (simple key-value persistence)
-// ─────────────────────────────────────────
+  // ── Microphone permission (macOS) ────────────────────────────────────
+  ipcMain.handle('system:request-mic-permission', async () => {
+    if (process.platform === 'darwin') {
+      const status = systemPreferences.getMediaAccessStatus('microphone');
+      if (status === 'not-determined') {
+        return await systemPreferences.askForMediaAccess('microphone');
+      }
+      return status === 'granted';
+    }
+    return true; // Windows/Linux — handled by browser
+  });
 
-function registerUserDataHandlers() {
-  // Simple implementation using Electron's app.getPath('userData')
-  // In production, replace with electron-store or similar
-  const fs = require('node:fs');
+  // ── User data (key-value persistence) ───────────────────────────────
   const dataDir = app.getPath('userData');
   const dataFile = path.join(dataDir, 'jarvis-data.json');
 
-  function readStore(): Record<string, string> {
-    try {
-      return JSON.parse(fs.readFileSync(dataFile, 'utf-8'));
-    } catch {
-      return {};
-    }
-  }
-
-  function writeStore(data: Record<string, string>) {
+  const readStore = (): Record<string, string> => {
+    try { return JSON.parse(fs.readFileSync(dataFile, 'utf-8')); }
+    catch { return {}; }
+  };
+  const writeStore = (data: Record<string, string>) => {
+    fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf-8');
-  }
+  };
 
-  ipcMain.handle('userdata:read', (_event, key: string) => {
-    const store = readStore();
-    return store[key] ?? null;
+  ipcMain.handle('userdata:read', (_e, key: string) => readStore()[key] ?? null);
+  ipcMain.handle('userdata:write', (_e, key: string, value: string) => {
+    const s = readStore(); s[key] = value; writeStore(s);
   });
 
-  ipcMain.handle('userdata:write', (_event, key: string, value: string) => {
-    const store = readStore();
-    store[key] = value;
-    writeStore(store);
+  // ── Wake word engine ─────────────────────────────────────────────────
+  ipcMain.handle('wakeword:start', (_e, config: { phrase: string; threshold: number }) => {
+    startWakeWord(config);
   });
-}
+  ipcMain.handle('wakeword:stop', () => stopWakeWord());
 
-// ─────────────────────────────────────────
-// IPC HANDLERS — Wake word (stub — replace with Porcupine/Picovoice)
-// ─────────────────────────────────────────
-
-function registerWakeWordHandlers() {
-  let wakeWordActive = false;
-
-  ipcMain.handle('wakeword:start', (_event, config: { phrase: string; threshold: number }) => {
-    wakeWordActive = true;
-    console.log(`[main] Wake word detection started: "${config.phrase}" (threshold: ${config.threshold})`);
-    // TODO: Initialise your chosen wake word engine here:
-    //   - Porcupine: require('@picovoice/porcupine-node')
-    //   - Snowboy: (deprecated, use Porcupine)
-    //   - Custom: implement your own detector
-    //
-    // When the phrase is detected, call:
-    //   mainWindow?.webContents.send(IPC_CHANNELS.WAKE_WORD_DETECTED, confidence)
+  // Dev tool: simulate wake word via IPC (for testing without a mic)
+  ipcMain.handle('wakeword:simulate', (_e, confidence = 0.95) => {
+    if (isDev) fireWakeWord(confidence);
   });
 
-  ipcMain.handle('wakeword:stop', () => {
-    wakeWordActive = false;
-    console.log('[main] Wake word detection stopped');
-    // TODO: Stop and clean up your wake word engine
+  // ── Audio devices ───────────────────────────────────────────────────
+  // Device enumeration is handled in the renderer via navigator.mediaDevices.
+  // These stubs exist for future native audio routing.
+  ipcMain.handle('audio:get-devices', async () => []);
+  ipcMain.handle('audio:set-input', () => {});
+  ipcMain.handle('audio:set-output', () => {});
+
+  // ── Jarvis mode changes from renderer ───────────────────────────────
+  ipcMain.on(IPC_CHANNELS.JARVIS_SLEEP, () => {
+    stopWakeWord();
   });
 
-  // For development — simulate a wake word detection via a menu item or shortcut
-  if (isDev) {
-    // You can call this from the terminal via: mainWindow.webContents.send(...)
-    // Or expose it via a dev menu item
-  }
-
-  return { get isActive() { return wakeWordActive; } };
-}
-
-// ─────────────────────────────────────────
-// IPC HANDLERS — Audio devices
-// ─────────────────────────────────────────
-
-function registerAudioHandlers() {
-  ipcMain.handle('audio:get-devices', async () => {
-    // Electron doesn't have a direct API for device enumeration in main.
-    // The renderer handles this via navigator.mediaDevices.enumerateDevices().
-    // This handler is a stub — return empty and let renderer enumerate.
-    return [];
-  });
-
-  ipcMain.handle('audio:set-input', (_event, _deviceId: string) => {
-    // Audio routing is handled in the renderer via AudioContext constraints.
-    // This stub exists for future native audio routing on macOS/Windows.
-  });
-
-  ipcMain.handle('audio:set-output', (_event, _deviceId: string) => {
-    // Same as above.
-  });
+  // ── App info ─────────────────────────────────────────────────────────
+  ipcMain.handle('app:is-dev', () => isDev);
 }
 
 // ─────────────────────────────────────────
@@ -255,37 +257,39 @@ function registerAudioHandlers() {
 // ─────────────────────────────────────────
 
 app.whenReady().then(() => {
-  // Register all IPC handlers before creating the window
-  registerWindowHandlers();
-  registerSystemHandlers();
-  registerUserDataHandlers();
-  registerWakeWordHandlers();
-  registerAudioHandlers();
-
-  mainWindow = createMainWindow();
+  registerIPCHandlers();
+  mainWindow = createWindow();
   tray = createTray();
+  registerGlobalShortcuts();
 
-  // macOS: Re-create window when dock icon is clicked and no windows exist
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow();
+      mainWindow = createWindow();
     } else {
       mainWindow?.show();
     }
   });
 });
 
-// Quit when all windows are closed (except on macOS)
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
+    globalShortcut.unregisterAll();
     app.quit();
   }
 });
 
-// Security: prevent new window creation
-app.on('web-contents-created', (_event, contents) => {
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  stopWakeWord();
+});
+
+// Security: prevent navigation away from the app
+app.on('web-contents-created', (_e, contents) => {
   contents.on('will-navigate', (event, url) => {
-    if (!isDev && !url.startsWith('file://')) {
+    const allowed = isDev
+      ? [NEXT_DEV_URL]
+      : [`file://${path.resolve(__dirname, '../out')}`];
+    if (!allowed.some((base) => url.startsWith(base))) {
       event.preventDefault();
       shell.openExternal(url);
     }

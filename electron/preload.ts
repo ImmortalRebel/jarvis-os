@@ -1,28 +1,16 @@
 // electron/preload.ts
-// Electron preload script — runs in a sandboxed context with access to both
-// Node.js APIs and the renderer DOM. Exposes a typed `electronAPI` object
-// via contextBridge so the renderer can call main-process features safely.
-//
-// SECURITY NOTES:
-//   - contextBridge.exposeInMainWorld() is the only safe way to expose APIs
-//   - Never expose ipcRenderer directly — that bypasses all sandboxing
-//   - All channel names are validated against the IPC_CHANNELS whitelist
-//   - Input is validated before being sent to the main process
-//
-// This file must be compiled separately from the Next.js build.
-// Add to your electron-builder / electron-vite config:
-//   preload: path.join(__dirname, 'preload.js')
+// Secure contextBridge preload — Phase 2B upgrade.
+// Compiled with tsconfig.electron.json, NOT by Next.js.
+// All channel names validated against whitelists before any IPC call.
 
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ElectronAPI, AudioDeviceInfo } from '../types/ipc';
 
 // ─────────────────────────────────────────
-// CHANNEL WHITELIST
-// Only channels in this list can be sent FROM the renderer.
-// The main process can send on any channel.
+// CHANNEL WHITELISTS
 // ─────────────────────────────────────────
 
-const ALLOWED_SEND_CHANNELS = new Set([
+const ALLOWED_SEND = new Set([
   'jarvis:wake',
   'jarvis:sleep',
   'jarvis:mode-change',
@@ -31,14 +19,14 @@ const ALLOWED_SEND_CHANNELS = new Set([
   'jarvis:tts-start',
   'jarvis:tts-stop',
   'jarvis:memory-query',
+  'jarvis:wake-word-detected',
   'window:minimize',
   'window:maximize',
   'window:close',
   'window:always-on-top',
-  'jarvis:wake-word-detected',
 ] as const);
 
-const ALLOWED_LISTEN_CHANNELS = new Set([
+const ALLOWED_LISTEN = new Set([
   'jarvis:wake',
   'jarvis:sleep',
   'jarvis:mode-change',
@@ -46,6 +34,7 @@ const ALLOWED_LISTEN_CHANNELS = new Set([
   'jarvis:error',
   'jarvis:memory-update',
   'jarvis:memory-result',
+  'jarvis:memory-query',
   'jarvis:transcript-ready',
   'jarvis:tts-start',
   'jarvis:tts-stop',
@@ -55,80 +44,62 @@ const ALLOWED_LISTEN_CHANNELS = new Set([
   'system:theme-change',
 ] as const);
 
-type AllowedSendChannel = typeof ALLOWED_SEND_CHANNELS extends Set<infer T> ? T : never;
-type AllowedListenChannel = typeof ALLOWED_LISTEN_CHANNELS extends Set<infer T> ? T : never;
+type SendChannel = typeof ALLOWED_SEND extends Set<infer T> ? T : never;
+type ListenChannel = typeof ALLOWED_LISTEN extends Set<infer T> ? T : never;
 
 // ─────────────────────────────────────────
 // EXPOSED API
 // ─────────────────────────────────────────
 
 const api: ElectronAPI = {
-  // ── Window management ──────────────────────────────────────────
-  minimize: () => ipcRenderer.send('window:minimize'),
-  maximize: () => ipcRenderer.send('window:maximize'),
-  close: () => ipcRenderer.send('window:close'),
-  setAlwaysOnTop: (value: boolean) =>
-    ipcRenderer.send('window:always-on-top', value),
+  // ── Window ──────────────────────────────────────────────────────────
+  minimize:       () => ipcRenderer.send('window:minimize'),
+  maximize:       () => ipcRenderer.send('window:maximize'),
+  close:          () => ipcRenderer.send('window:close'),
+  setAlwaysOnTop: (v) => ipcRenderer.send('window:always-on-top', v),
 
-  // ── System info ────────────────────────────────────────────────
+  // ── System ──────────────────────────────────────────────────────────
   getPlatform: () => ipcRenderer.invoke('system:get-platform'),
-  getVersion: () => ipcRenderer.invoke('system:get-version'),
+  getVersion:  () => ipcRenderer.invoke('system:get-version'),
 
-  // ── Persistent user data ───────────────────────────────────────
-  readUserData: (key: string) => ipcRenderer.invoke('userdata:read', key),
-  writeUserData: (key: string, value: string) =>
-    ipcRenderer.invoke('userdata:write', key, value),
+  // ── User data ────────────────────────────────────────────────────────
+  readUserData:  (key)       => ipcRenderer.invoke('userdata:read', key),
+  writeUserData: (key, val)  => ipcRenderer.invoke('userdata:write', key, val),
 
-  // ── Wake word engine ───────────────────────────────────────────
-  startWakeWord: (config: { phrase: string; threshold: number }) =>
-    ipcRenderer.invoke('wakeword:start', config),
-  stopWakeWord: () => ipcRenderer.invoke('wakeword:stop'),
-  onWakeWordDetected: (callback: (confidence: number) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, confidence: number) =>
-      callback(confidence);
-    ipcRenderer.on('jarvis:wake-word-detected', listener);
-    // Return unsubscribe function
-    return () => ipcRenderer.removeListener('jarvis:wake-word-detected', listener);
+  // ── Wake word ────────────────────────────────────────────────────────
+  startWakeWord: (config) => ipcRenderer.invoke('wakeword:start', config),
+  stopWakeWord:  ()       => ipcRenderer.invoke('wakeword:stop'),
+  onWakeWordDetected: (cb) => {
+    const handler = (_: Electron.IpcRendererEvent, conf: number) => cb(conf);
+    ipcRenderer.on('jarvis:wake-word-detected', handler);
+    return () => ipcRenderer.removeListener('jarvis:wake-word-detected', handler);
   },
 
-  // ── Audio device routing ───────────────────────────────────────
-  getAudioDevices: (): Promise<AudioDeviceInfo[]> =>
-    ipcRenderer.invoke('audio:get-devices'),
-  setAudioInputDevice: (deviceId: string) =>
-    ipcRenderer.invoke('audio:set-input', deviceId),
-  setAudioOutputDevice: (deviceId: string) =>
-    ipcRenderer.invoke('audio:set-output', deviceId),
+  // ── Audio devices ─────────────────────────────────────────────────────
+  getAudioDevices:     (): Promise<AudioDeviceInfo[]> => ipcRenderer.invoke('audio:get-devices'),
+  setAudioInputDevice: (id) => ipcRenderer.invoke('audio:set-input', id),
+  setAudioOutputDevice:(id) => ipcRenderer.invoke('audio:set-output', id),
 
-  // ── Generic IPC event bus ──────────────────────────────────────
-
-  send: (channel: string, ...args: unknown[]) => {
-    if (ALLOWED_SEND_CHANNELS.has(channel as AllowedSendChannel)) {
+  // ── Generic IPC ─────────────────────────────────────────────────────
+  send: (channel, ...args) => {
+    if (ALLOWED_SEND.has(channel as SendChannel)) {
       ipcRenderer.send(channel, ...args);
-    } else {
-      console.warn(`[preload] Blocked send on unauthorized channel: "${channel}"`);
+    } else if (process.env.NODE_ENV === 'development') {
+      console.warn(`[preload] Blocked send on: "${channel}"`);
     }
   },
 
-  on: (channel: string, callback: (...args: unknown[]) => void) => {
-    if (!ALLOWED_LISTEN_CHANNELS.has(channel as AllowedListenChannel)) {
-      console.warn(`[preload] Blocked listen on unauthorized channel: "${channel}"`);
+  on: (channel, callback) => {
+    if (!ALLOWED_LISTEN.has(channel as ListenChannel)) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`[preload] Blocked listen on: "${channel}"`);
+      }
       return () => {};
     }
-    const listener = (_event: Electron.IpcRendererEvent, ...args: unknown[]) =>
-      callback(...args);
-    ipcRenderer.on(channel, listener);
-    // Return the cleanup/unsubscribe function
-    return () => ipcRenderer.removeListener(channel, listener);
+    const handler = (_: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
   },
 };
 
-// ─────────────────────────────────────────
-// EXPOSE TO RENDERER
-// ─────────────────────────────────────────
-
 contextBridge.exposeInMainWorld('electronAPI', api);
-
-// Type declaration reminder for the renderer:
-// The global Window augmentation in types/ipc.ts already declares:
-//   interface Window { electronAPI?: ElectronAPI }
-// So window.electronAPI is fully typed in the renderer automatically.
